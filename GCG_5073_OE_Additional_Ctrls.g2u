@@ -1,0 +1,179 @@
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'BN, May 28, 2018
+'Company: House of Doolittle
+'Features:
+'This project will add two additional text boxes and labels to the Short Order Form
+'for fields: On Hand Quantity (Inventory_Mstr.Qty_Onhand) and No Ship Before Date(Order_Lines.No_DLVR_Before_Date) 
+'A scan will be done at the Order Entry > Transactions > Shipments > New (hook 39205) to check all Sales Order lines for the No_DLVR_BEFORE_DATE. If it is before the current date, it will update that field to blank, which means allowing the core program to ship those lines. This has to be done because the core will not allow to ship if we put whatever date in that field.
+f.Intrinsic.Control.Try
+v.Local..BulkDeclareString(sError,sSQL)
+
+F.odbc.Connection!conx.OpenCompanyConnection
+
+F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+	'Populate hook _ Order Entry > File > Sales Orders > Open/New
+	F.Intrinsic.Control.Case(12440)
+		f.Intrinsic.Control.CallSub("Name_and_Show_Hidden_Controls")		
+	'Order Entry > File > Sales Orders > Open/New > Lines : Load-Part-hook 12455, Line-changed-Hook: 12445	
+	f.Intrinsic.Control.CaseAny(12455,12445)
+		f.Intrinsic.Control.CallSub("get_OnHand_qty_and_No_Ship_Before_Date")	
+	'Order Entry > File > Sales Orders > Open/New > Lines : Save button
+	F.Intrinsic.Control.Case(12511)
+		f.Intrinsic.Control.CallSub("Save_No_Ship_Before_Date")		
+	'Order Entry > Transactions > Shipments > New
+	f.Intrinsic.Control.Case(39205)
+		f.Intrinsic.UI.InvokeWaitDialog("Scanning No Ship Before Date...")
+		f.Intrinsic.String.Build("Update Order_Lines Set No_DLVR_BEFORE_DATE = '' where record_type = 'L' and ltrim(rtrim(No_DLVR_BEFORE_DATE)) not in ('00000000','0','') and DATEFROMPARTS(left(No_DLVR_BEFORE_DATE,4),substring(No_DLVR_BEFORE_DATE,5,2),right(No_DLVR_BEFORE_DATE,2)) <= '{0}';",v.Ambient.Date.PervasiveDate,v.Local.sSQL)
+		f.ODBC.Connection!conx.Execute(v.Local.sSQL)
+		f.Intrinsic.UI.CloseWaitDialog		
+F.Intrinsic.Control.EndSelect
+
+F.ODBC.Connection!conx.Close
+
+F.Intrinsic.Control.Catch
+	Function.Intrinsic.String.Concat("Subroutine Error",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.CallSub("Unload")
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Main.End
+
+Program.Sub.Name_and_Show_Hidden_Controls.Start
+f.Intrinsic.Control.Try
+v.Local..BulkDeclareString(sError)
+
+'Set horizontal position
+f.Intrinsic.Variable.SetProperty("000306","PL",831)
+f.Intrinsic.Variable.SetProperty("000307","PL",831)
+f.Intrinsic.Variable.SetProperty("000308","PL",645)
+f.Intrinsic.Variable.SetProperty("000309","PL",645)
+'Set vertical position
+F.Intrinsic.Variable.SetProperty("000306","PT",29)
+F.Intrinsic.Variable.SetProperty("000307","PT",46)
+F.Intrinsic.Variable.SetProperty("000308","PT",109)
+F.Intrinsic.Variable.SetProperty("000309","PT",126)
+'Width
+F.Intrinsic.Variable.SetProperty("000309","PW",60)
+
+V.Passed.000306.Set("Qty On Hand")
+f.Intrinsic.UI.ChangeCallerProperty(v.Passed.000306,"HIDE",0)
+F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000306,"LOCK",0)
+f.Intrinsic.UI.ChangeCallerProperty(v.Passed.000308,"HIDE",0)
+F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000308,"LOCK",1)
+V.Passed.000308.Set("Do Not Ship Before")
+f.Intrinsic.UI.ChangeCallerProperty(v.Passed.000307,"HIDE",0)
+F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000307,"LOCK",1)
+f.Intrinsic.UI.ChangeCallerProperty(v.Passed.000309,"HIDE",0)
+F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000309,"LOCK",0)
+
+F.Intrinsic.Control.Catch
+	Function.Intrinsic.String.Concat("Subroutine Error",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.CallSub("Unload")
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Name_and_Show_Hidden_Controls.End
+
+Program.Sub.get_OnHand_qty_and_No_Ship_Before_Date.Start
+f.Intrinsic.Control.Try
+v.Local..BulkDeclareString(sError,sSQL,sRet,sPart,sOrder,sLine)
+v.Local..BulkDeclareDate(dHold,d1900)
+'Part (17 Char): v.Passed.000071
+'Rev: v.Passed.000072
+'Loc: v.Passed.000074
+'Order Num: Variable.Passed.000005
+'Order Line: Variable.Passed.000013
+
+f.Intrinsic.String.GSSPartString(v.Passed.000071.Trim,v.Passed.000072.Trim,v.Local.sPart)
+f.Intrinsic.String.LPad(Variable.Passed.000005,"0",7,v.Local.sOrder)
+f.Intrinsic.String.LPad(Variable.Passed.000013,"0",3,v.Local.sLine)
+v.Local.d1900.Set("01/01/1900")
+
+'Get Qty Onhand
+f.Intrinsic.String.Build("Select QTY_ONHAND from Inventory_Mstr where Part = '{0}' and Location = '{1}'",v.Local.sPart,v.Passed.000074,v.Local.sSQL)
+f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+F.Intrinsic.Control.If(v.Local.sRet,<>,"")
+	V.Passed.000307.Set(v.Local.sRet)
+	'f.Intrinsic.UI.ChangeCallerProperty(v.Passed.000307,"LOCK",1)
+	
+f.Intrinsic.Control.EndIf
+
+'Get No Ship Before Date
+f.Intrinsic.String.Build("Select No_DLVR_BEFORE_DATE from V_Order_Lines where Order_No = '{0}' and Record_No = '{1}0'",v.Local.sOrder,v.Local.sLine,v.Local.sSQL)
+f.ODBC.Connection!conx.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+F.Intrinsic.Control.If(v.Local.sRet,<>,"")
+	v.Local.dHold.Set(v.Local.sRet)
+	f.Intrinsic.Control.If(v.Local.dHold,<>,v.Local.d1900)
+		f.Intrinsic.String.Format(v.Local.dHold,"MM/DD/YYYY",v.Local.sRet)
+		V.Passed.000309.Set(v.Local.sRet)
+	f.Intrinsic.Control.Else
+		V.Passed.000309.Set("")	
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+	Function.Intrinsic.String.Concat("Subroutine Error",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.CallSub("Unload")
+F.Intrinsic.Control.EndTry
+Program.Sub.get_OnHand_qty_and_No_Ship_Before_Date.End
+
+Program.Sub.Save_No_Ship_Before_Date.Start
+f.Intrinsic.Control.Try
+v.Local..BulkDeclareString(sError,sSQL,sRet,sPart,sOrder,sLine,sDLVR,sDLVRInput)
+v.Local.dHold.Declare
+'Order Num: Variable.Passed.000005
+'Order Line: Variable.Passed.000013
+f.Intrinsic.String.LPad(Variable.Passed.000005,"0",7,v.Local.sOrder)
+f.Intrinsic.String.LPad(Variable.Passed.000013,"0",3,v.Local.sLine)
+v.Local.sDLVRInput.Set(v.Passed.000309.Trim)
+
+f.Intrinsic.Control.If(v.Local.sDLVRInput.Trim,=,"")
+	v.Local.sDLVR.Set("")	
+f.Intrinsic.Control.ElseIf(v.Local.sDLVRInput.IsDate)
+	v.Local.dHold.Set(v.Local.sDLVRInput)
+	f.Intrinsic.String.Format(v.Local.dHold,"YYYYMMDD",v.Local.sDLVR)
+f.Intrinsic.Control.Else
+	f.Intrinsic.UI.Msgbox("No Ship Before date format must be MM/DD/YYYY","Invalid Date")
+	f.Intrinsic.Control.ExitSub
+f.Intrinsic.Control.EndIf
+f.Intrinsic.String.Build("Update Order_Lines Set No_DLVR_BEFORE_DATE = '{0}' where Order_No = '{1}' and Record_No = '{2}0' and Record_Type = 'L'",v.Local.sDLVR,v.Local.sOrder,v.Local.sLine,v.Local.sSQL)
+f.ODBC.Connection!conx.Execute(v.Local.sSQL)
+
+F.Intrinsic.Control.Catch
+	Function.Intrinsic.String.Concat("Subroutine Error",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	f.Intrinsic.Control.CallSub("Unload")
+F.Intrinsic.Control.EndTry
+Program.Sub.Save_No_Ship_Before_Date.End
+
+Program.Sub.Unload.Start
+f.Intrinsic.Control.Try
+v.Local.sError.Declare
+
+F.Intrinsic.Control.If(V.ODBC.conx.State,=,1)
+	F.ODBC.Connection!conx.close
+F.Intrinsic.Control.EndIf
+f.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+	Function.Intrinsic.String.Concat("Subroutine Error",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.End 
+F.Intrinsic.Control.EndTry
+Program.Sub.Unload.End
+
+Program.Sub.Comments.Start
+${$0$}$$}$$}$11/22/2016 10:57:31 AM$}$False
+${$3$}$0$}$$}$0$}$-1$}$$}$12:00:00 AM$}$
+'BN, May 28, 2018
+'Company: House of Doolittle
+'Features:
+'This project will add two additional text boxes and labels 
+'for fields: On Hand Quantity (Inventory_Mstr.Qty_Onhand) and No Ship Before Date(Order_Lines.No_DLVR_Before_Date) 
+'to the Short Order Form
+Program.Sub.Comments.End
